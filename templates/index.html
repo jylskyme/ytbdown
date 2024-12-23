@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Video Downloader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- 标题和简介 -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-800 mb-4">YouTube Video Downloader</h1>
+            <p class="text-gray-600">输入YouTube视频链接，轻松下载高质量视频</p>
+        </div>
+
+        <!-- 下载表单 -->
+        <div class="max-w-xl mx-auto bg-white rounded-lg shadow-md p-6 mb-8">
+            <div class="flex gap-2 mb-4">
+                <input type="text" id="videoUrl" 
+                    class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:border-blue-500"
+                    placeholder="请输入YouTube视频链接" oninput="debounceGetFormats(event)">
+            </div>
+            <div id="formatSelector" class="hidden mb-4">
+                <select id="formatId" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-blue-500">
+                    <option value="">选择视频清晰度...</option>
+                </select>
+            </div>
+            <div class="flex justify-end">
+                <button onclick="startDownload()" 
+                    class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+                    下载
+                </button>
+            </div>
+            <div id="progressBar" class="hidden mt-4">
+                <div class="flex justify-between text-sm text-gray-600 mb-1">
+                    <span id="progressPercent">0%</span>
+                    <span id="progressSize">0 MB / 0 MB</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2.5 mb-1">
+                    <div id="progress" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div class="flex justify-between text-sm text-gray-600">
+                    <span id="progressText"></span>
+                    <span id="progressSpeed">0 MB/s</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 视频列表 -->
+        <div class="max-w-4xl mx-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold text-gray-800">已下载视频</h2>
+                <div class="flex gap-4">
+                    <select id="sortBy" onchange="updateSort()" class="px-3 py-1 border rounded-lg focus:outline-none focus:border-blue-500">
+                        <option value="date" {% if sort_by == 'date' %}selected{% endif %}>按下载时间</option>
+                        <option value="size" {% if sort_by == 'size' %}selected{% endif %}>按文件大小</option>
+                        <option value="duration" {% if sort_by == 'duration' %}selected{% endif %}>按视频时长</option>
+                    </select>
+                    <select id="order" onchange="updateSort()" class="px-3 py-1 border rounded-lg focus:outline-none focus:border-blue-500">
+                        <option value="desc" {% if order == 'desc' %}selected{% endif %}>降序</option>
+                        <option value="asc" {% if order == 'asc' %}selected{% endif %}>升序</option>
+                    </select>
+                </div>
+            </div>
+            <div id="videoList" class="space-y-4">
+                {% for video in videos %}
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <div class="flex gap-4">
+                        <div class="w-48 flex-shrink-0">
+                            <img src="{{ video.thumbnail_url }}" 
+                                 alt="{{ video.title }}"
+                                 class="w-full h-28 object-cover rounded"
+                                 onerror="this.src='https://i.ytimg.com/img/no_thumbnail.jpg'"
+                            >
+                        </div>
+                        <div class="flex-1">
+                            <h3 class="text-xl font-semibold text-gray-800">{{ video.title }}</h3>
+                            <p class="text-gray-600">上传者: {{ video.uploader }}</p>
+                            <p class="text-gray-600">时长: {{ video.duration }}秒</p>
+                            <p class="text-gray-600">文件大小: {{ video.filesize // 1024 // 1024 }}MB</p>
+                            <p class="text-gray-600">下载时间: {{ video.download_date }}</p>
+                            <p class="text-gray-600">存储路径: {{ video.filename }}</p>
+                            <p class="text-gray-600 mt-2 line-clamp-3">{{ video.description }}</p>
+                            <div class="mt-4 flex gap-2">
+                                <a href="{{ video.url }}" target="_blank" 
+                                   class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+                                    在YouTube查看
+                                </a>
+                                <button onclick="openFolder('{{ video.id }}')" 
+                                    class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors">
+                                    打开文件位置
+                                </button>
+                                <button onclick="deleteVideo('{{ video.id }}')" 
+                                    class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors">
+                                    删除
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加视频播放对话框 -->
+    <div id="videoModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white p-4 rounded-lg max-w-4xl w-full mx-4">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold" id="videoModalTitle"></h3>
+                <button onclick="closeVideoModal()" class="text-gray-500 hover:text-gray-700">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <video id="modalVideo" controls class="w-full rounded">
+                <source src="" type="video/mp4">
+                您的浏览器不支持视频播放
+            </video>
+        </div>
+    </div>
+
+    <script>
+        // 添加防抖函数
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        // 添加一个新的函数来显示/隐藏加载提示
+        function showLoadingTip(show, message = '正在读取链接...') {
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            
+            if (show) {
+                progressBar.classList.remove('hidden');
+                progressText.textContent = message;
+                // 隐藏其他进度相关的显示
+                document.getElementById('progress').style.width = '0%';
+                document.getElementById('progressPercent').textContent = '';
+                document.getElementById('progressSize').textContent = '';
+                document.getElementById('progressSpeed').textContent = '';
+            } else {
+                progressBar.classList.add('hidden');
+                progressText.textContent = '';
+            }
+        }
+
+        // 修改debounceGetFormats函数
+        const debounceGetFormats = debounce(async (event) => {
+            const url = event.target.value;
+            // 重置下载状态和格式选择器
+            resetDownloadStatus();
+            const formatSelector = document.getElementById('formatSelector');
+            formatSelector.classList.add('hidden');
+            document.getElementById('formatId').innerHTML = '<option value="">选择视频清晰度...</option>';
+            
+            if (url.includes('youtube.com/') || url.includes('youtu.be/')) {
+                // 显示加载提示
+                showLoadingTip(true);
+                try {
+                    await getFormats();
+                    // 成功获取格式后隐藏加载提示
+                    showLoadingTip(false);
+                } catch (error) {
+                    // 如果出错，显示错误信息
+                    showLoadingTip(true, '读取链接失败，请检查链接是否正确');
+                    setTimeout(() => showLoadingTip(false), 3000); // 3秒后隐藏错误信息
+                }
+            }
+        }, 500);  // 500ms 延迟
+
+        // 重置下载状态
+        function resetDownloadStatus() {
+            const progressBar = document.getElementById('progressBar');
+            const progress = document.getElementById('progress');
+            const progressText = document.getElementById('progressText');
+            const progressPercent = document.getElementById('progressPercent');
+            const progressSize = document.getElementById('progressSize');
+            const progressSpeed = document.getElementById('progressSpeed');
+            
+            // 隐藏进度条
+            progressBar.classList.add('hidden');
+            // 重置所有进度相关的显示
+            progress.style.width = '0%';
+            progressText.textContent = '';
+            progressPercent.textContent = '0%';
+            progressSize.textContent = '0 MB / 0 MB';
+            progressSpeed.textContent = '0 MB/s';
+        }
+
+        // 修改getFormats函数
+        async function getFormats() {
+            const url = document.getElementById('videoUrl').value;
+            if (!url) return;
+
+            const response = await fetch('/formats?url=' + encodeURIComponent(url));
+            const data = await response.json();
+            
+            if (data.formats) {
+                const selector = document.getElementById('formatId');
+                selector.innerHTML = '<option value="">选择视频清晰度...</option>';
+                
+                data.formats.forEach(format => {
+                    const size = format.filesize ? ` (${(format.filesize/1024/1024).toFixed(1)}MB)` : '';
+                    const option = document.createElement('option');
+                    option.value = format.format_id;
+                    option.textContent = `${format.display_name}${size}`;
+                    selector.appendChild(option);
+                });
+                
+                document.getElementById('formatSelector').classList.remove('hidden');
+            } else {
+                throw new Error('Failed to get formats');
+            }
+        }
+
+        // 修改startDownload函数
+        async function startDownload() {
+            const url = document.getElementById('videoUrl').value;
+            const formatId = document.getElementById('formatId').value;
+            if (!url) return;
+
+            // 重置并显示进度条
+            resetDownloadStatus();
+            document.getElementById('progressBar').classList.remove('hidden');
+            
+            // 开始下载
+            const response = await fetch('/download?url=' + encodeURIComponent(url) + 
+                (formatId ? '&format_id=' + encodeURIComponent(formatId) : ''), {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                const videoId = url.match(/(?:v=|\/)([a-zA-Z0-9_-]{11})/)?.[1];
+                if (videoId) {
+                    checkProgress(videoId);
+                }
+            }
+        }
+
+        async function updateVideoList() {
+            const sortBy = document.getElementById('sortBy').value;
+            const order = document.getElementById('order').value;
+            const response = await fetch(`/videos?sort_by=${sortBy}&order=${order}`);
+            const videos = await response.json();
+            
+            const videoList = document.getElementById('videoList');
+            videoList.innerHTML = '';
+            
+            videos.forEach(video => {
+                console.log('Video path:', `/downloads/${video.filename}`);
+                videoList.appendChild(createVideoElement(video));
+            });
+        }
+
+        async function checkProgress(videoId) {
+            while (true) {
+                try {
+                    const response = await fetch(`/progress/${videoId}`);
+                    const data = await response.json();
+
+                    // 调试输出
+                    console.log('Progress data:', data);
+
+                    if (data.status === 'downloading') {
+                        // 确保数值有效
+                        const downloaded = parseInt(data.downloaded_bytes) || 0;
+                        const total = parseInt(data.total_bytes) || 0;
+                        const speed = parseInt(data.speed) || 0;
+                        const percent = parseFloat(data.percent) || 0;
+
+                        // 转换为MB并保留一位小数
+                        const downloadedMB = (downloaded / 1024 / 1024).toFixed(1);
+                        const totalMB = (total / 1024 / 1024).toFixed(1);
+                        const speedMB = (speed / 1024 / 1024).toFixed(1);
+
+                        // 更新UI
+                        document.getElementById('progress').style.width = `${percent}%`;
+                        document.getElementById('progressPercent').textContent = `${percent.toFixed(1)}%`;
+                        document.getElementById('progressSize').textContent = 
+                            total > 0 ? `${downloadedMB} MB / ${totalMB} MB` : `${downloadedMB} MB`;
+                        document.getElementById('progressSpeed').textContent = `${speedMB} MB/s`;
+
+                        if (data.eta) {
+                            const minutes = Math.floor(data.eta / 60);
+                            const seconds = data.eta % 60;
+                            document.getElementById('progressText').textContent = 
+                                `预计剩余时间: ${minutes}分${seconds}秒`;
+                        } else {
+                            document.getElementById('progressText').textContent = '计算中...';
+                        }
+
+                        // 调试输出
+                        console.log('Progress update:', {
+                            downloadedMB,
+                            totalMB,
+                            speedMB,
+                            percent: percent.toFixed(1) + '%'
+                        });
+
+                    } else if (data.status === 'finished') {
+                        // 确保在完成时显示正确的大小
+                        const finalSize = parseInt(data.total_bytes) || 0;
+                        const finalMB = (finalSize / 1024 / 1024).toFixed(1);
+
+                        // 更新UI显示完成状态
+                        document.getElementById('progress').style.width = '100%';
+                        document.getElementById('progressPercent').textContent = '100%';
+                        document.getElementById('progressSize').textContent = `${finalMB} MB / ${finalMB} MB`;
+                        document.getElementById('progressSpeed').textContent = '';
+                        document.getElementById('progressText').textContent = '下载完成！';
+
+                        // 调试输出
+                        console.log('Download finished:', {
+                            finalSize: finalMB + ' MB'
+                        });
+
+                        // 更新视频列表
+                        await updateVideoList();
+                        // 只重置格式选择器，不清除URL
+                        document.getElementById('formatSelector').classList.add('hidden');
+                        document.getElementById('formatId').innerHTML = '<option value="">选择视频清晰度...</option>';
+                        break;
+                    }
+                } catch (error) {
+                    console.error('Error checking progress:', error);
+                }
+
+                // 每秒更新一次
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+
+        async function updateSort() {
+            await updateVideoList();
+        }
+
+        async function deleteVideo(videoId) {
+            if (!confirm('确定要删除这个视频吗？此操作不可恢复。')) {
+                return;
+            }
+            
+            const response = await fetch(`/delete/${videoId}`, {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                // 更新视频列表
+                await updateVideoList();
+            } else {
+                const data = await response.json();
+                alert(data.error || '删除失败');
+            }
+        }
+
+        async function openFolder(videoId) {
+            const response = await fetch(`/open_folder/${videoId}`);
+            const data = await response.json();
+            
+            if (!response.ok) {
+                alert(data.error || '无法打开文件位置');
+            }
+        }
+
+        function handleVideoError(video) {
+            const errorElement = video.parentElement.querySelector('.video-error');
+            const sourceUrl = video.querySelector('source').src;
+            errorElement.textContent = `视频加载失败: ${video.error ? video.error.message : '未知错误'} (${sourceUrl})`;
+            errorElement.classList.remove('hidden');
+            console.error('Video error:', video.error, 'Source:', sourceUrl);
+            
+            // 尝试获取文件信息
+            fetch('/debug/files')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Debug file info:', data);
+                })
+                .catch(error => {
+                    console.error('Debug error:', error);
+                });
+        }
+
+        function createVideoElement(video) {
+            const videoElement = document.createElement('div');
+            videoElement.className = 'bg-white rounded-lg shadow-md p-4';
+            videoElement.innerHTML = `
+                <div class="flex gap-4">
+                    <div class="w-48 flex-shrink-0">
+                        <img src="${video.thumbnail_url}" 
+                             alt="${video.title}"
+                             class="w-full h-28 object-cover rounded"
+                             onerror="this.src='https://i.ytimg.com/img/no_thumbnail.jpg'"
+                        >
+                    </div>
+                    <div class="flex-1">
+                        <h3 class="text-xl font-semibold text-gray-800">${video.title}</h3>
+                        <p class="text-gray-600">上传者: ${video.uploader}</p>
+                        <p class="text-gray-600">时长: ${video.duration}秒</p>
+                        <p class="text-gray-600">文件大小: ${Math.floor(video.filesize/1024/1024)}MB</p>
+                        <p class="text-gray-600">下载时间: ${video.download_date}</p>
+                        <p class="text-gray-600">存储路径: ${video.filename}</p>
+                        <p class="text-gray-600 mt-2 line-clamp-3">${video.description}</p>
+                        <div class="mt-4 flex gap-2">
+                            <a href="${video.url}" target="_blank" 
+                               class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+                                在YouTube查看
+                            </a>
+                            <button onclick="openFolder('${video.id}')" 
+                                class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors">
+                                打开文件位置
+                            </button>
+                            <button onclick="deleteVideo('${video.id}')" 
+                                class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors">
+                                删除
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            return videoElement;
+        }
+
+        // 添加视频播放相关函数
+        function openVideo(videoUrl) {
+            const modal = document.getElementById('videoModal');
+            const video = document.getElementById('modalVideo');
+            video.querySelector('source').src = videoUrl;
+            video.load();
+            modal.classList.remove('hidden');
+        }
+
+        function closeVideoModal() {
+            const modal = document.getElementById('videoModal');
+            const video = document.getElementById('modalVideo');
+            video.pause();
+            modal.classList.add('hidden');
+        }
+
+        document.addEventListener('DOMContentLoaded', updateVideoList);
+
+        // 添加缩略图误处理函数
+        function handleThumbnailError(img, title) {
+            console.error(`Thumbnail load error for: ${title}`);
+            console.error('Image src:', img.src);
+            
+            // 显示错误信息
+            const errorElement = img.parentElement.parentElement.querySelector('.thumbnail-error');
+            errorElement.textContent = `无法加载缩略图: ${img.src}`;
+            errorElement.classList.remove('hidden');
+            
+            // 替换为默认缩略图
+            const container = img.parentElement;
+            container.innerHTML = `
+                <div class="w-full h-48 bg-gray-200 rounded flex items-center justify-center cursor-pointer"
+                     onclick="openVideo('${img.onclick.toString().match(/'([^']+)'/)[1]}')">
+                    <svg class="w-16 h-16 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 0C4.477 0 0 4.477 0 10c0 5.523 4.477 10 10 10s10-4.477 10-10C20 4.477 15.523 0 10 0zm3.5 10.5l-5 3A.5.5 0 017 13V7a.5.5 0 01.8-.4l5 3a.5.5 0 010 .8z"/>
+                    </svg>
+                </div>
+            `;
+            
+            // 获取调试信息
+            fetch('/debug/files')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Debug file info:', data);
+                })
+                .catch(error => {
+                    console.error('Debug error:', error);
+                });
+        }
+    </script>
+</body>
+</html> 
